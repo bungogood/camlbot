@@ -45,6 +45,14 @@ type eval_mode =
       ; device : Torch.Device.t option
       }
 
+type runtime_eval =
+  | Pipcount_eval of Equity.t
+  | Td_eval of
+      { td : Td.t
+      ; look_ahead : int
+      ; equity_fn : Equity.t
+      }
+
 let parse_hidden_sizes s =
   String.split s ~on:','
   |> List.filter ~f:(fun x -> not (String.is_empty (String.strip x)))
@@ -116,11 +124,58 @@ let parse_eval_mode () =
 
 let current_eval =
   match parse_eval_mode () with
-  | Pipcount -> Equity.minimax Equity.pip_count_ratio ~look_ahead:1 Outcome.Game
+  | Pipcount -> Pipcount_eval (Equity.minimax Equity.pip_count_ratio ~look_ahead:1 Outcome.Game)
   | Td { hidden_layer_sizes; activation; representation; ckpt; look_ahead; device } ->
     let td = Td.create ?device ~hidden_layer_sizes ~activation ~representation () in
     Td.load td ~filename:ckpt;
-    Equity.minimax' (Td.eval td) ~look_ahead Outcome.Game
+    Td_eval
+      { td
+      ; look_ahead
+      ; equity_fn = Equity.minimax' (Td.eval td) ~look_ahead Outcome.Game
+      }
+
+let score_one ~player ~board =
+  let setup =
+    { Equity.Setup.player
+    ; to_play = Player.flip player
+    ; board
+    }
+  in
+  match current_eval with
+  | Pipcount_eval equity_fn -> Equity.eval equity_fn setup
+  | Td_eval { look_ahead; td; equity_fn } ->
+    if Int.equal look_ahead 1 then
+      Td.eval td [| setup |] |> fun xs -> xs.(0)
+    else
+      Equity.eval equity_fn setup
+
+let score_many ~player boards =
+  match current_eval with
+  | Pipcount_eval equity_fn ->
+    List.map boards ~f:(fun board ->
+      Equity.eval equity_fn
+        { Equity.Setup.player
+        ; to_play = Player.flip player
+        ; board
+        })
+  | Td_eval { look_ahead; td; equity_fn } ->
+    if Int.equal look_ahead 1 then
+      boards
+      |> List.map ~f:(fun board ->
+           { Equity.Setup.player
+           ; to_play = Player.flip player
+           ; board
+           })
+      |> Array.of_list
+      |> Td.eval td
+      |> Array.to_list
+    else
+      List.map boards ~f:(fun board ->
+        Equity.eval equity_fn
+          { Equity.Setup.player
+          ; to_play = Player.flip player
+          ; board
+          })
 
 let choose_best_turn ~player ~board ~roll =
   let turns = Move.all_legal_turns roll player board in
@@ -129,18 +184,9 @@ let choose_best_turn ~player ~board ~roll =
   | [([], _)] -> `Pass
   | _ ->
     let non_empty_turns = List.filter turns ~f:(fun (moves, _) -> not (List.is_empty moves)) in
-    let scored_turns =
-      non_empty_turns
-      |> List.map ~f:(fun (moves, resulting_board) ->
-        let score =
-          Equity.eval current_eval
-            { Equity.Setup.player = player
-            ; to_play = Player.flip player
-            ; board = resulting_board
-            }
-        in
-        moves, score)
-    in
+    let boards = List.map non_empty_turns ~f:snd in
+    let scores = score_many ~player boards in
+    let scored_turns = List.map2_exn non_empty_turns scores ~f:(fun (moves, _) score -> moves, score) in
     let best_turn = List.max_elt scored_turns ~compare:(fun (_, s1) (_, s2) -> Float.compare s1 s2) in
     match best_turn with
     | None -> `Pass
