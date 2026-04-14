@@ -25,7 +25,109 @@ This algorithm cannot be used in quite as general a setting as TD(*&lambda;*) it
 - It is straightforward to use a different amplification scheme in place of 1-ply look-ahead, such as Monte Carlo tree search or one of its variants. With such a modification the algorithm may be viewed as a simplified version of [AlphaZero](https://arxiv.org/abs/1712.01815).
 - The training of the neural network is decoupled from the process of generating training examples. This makes it possible to use the training examples more efficiently and to apply techniques such as [experience replay](https://arxiv.org/pdf/1312.5602.pdf) to further smoothen training. It also simplifies parallelisation of the algorithm.
 
-The implementation uses [tensorflow-ocaml](https://github.com/LaurentMazare/tensorflow-ocaml).
+The original implementation used `tensorflow-ocaml`.
+
+The modernized path in this repo uses `janestreet/torch` (installed as opam package `torch`) with
+ARM-native libtorch.
+
+### Modern OCaml setup (ARM)
+
+```bash
+# one-time switch/package refresh
+opam update
+opam upgrade
+
+# runtime deps
+brew install libomp
+
+# OCaml deps
+opam install core async torch
+
+# build
+opam exec -- dune build ./main.exe ./ubgi_engine.exe ./torch_smoke.exe
+```
+
+If torch runtime fails with `libomp.dylib` not found, make sure `libomp` is available in your
+libtorch runtime search path (or symlink `libomp.dylib` into the libtorch `lib` directory).
+
+Quick smoke test:
+
+```bash
+dune exec ./torch_smoke.exe
+```
+
+Minimal training smoke (torch backend + checkpoint save/load):
+
+```bash
+mkdir -p models
+dune exec ./torch_train.exe
+```
+
+This writes a checkpoint to `models/td_torch_bootstrap.ot`.
+
+### Legacy TensorFlow checkpoint conversion
+
+To migrate old `.ckpt` files to Torch `.ot`:
+
+```bash
+# 1) export TF checkpoint tensors to npz (python venv with tensorflow-macos)
+.venv-convert312/bin/python scripts/tf_ckpt_to_npz.py \
+  --ckpt models/legacy_gcs/large.5000.ckpt \
+  --out  models/legacy_gcs/large.5000.npz
+
+# 2) convert npz tensors to Torch checkpoint
+opam exec -- dune exec ./convert_legacy_ckpt.exe -- \
+  -npz models/legacy_gcs/large.5000.npz \
+  -out models/converted/large.5000.ot \
+  -activation Relu
+```
+
+See `docs/WEIGHTS_CONVERSION.md` for batch conversion and recommended activation settings per family.
+
+## UBGI engine mode
+
+This repo now includes a minimal UBGI-compatible engine entrypoint for `bgci`.
+
+Build it with:
+
+```bash
+opam exec -- dune build ./ubgi_engine.exe
+```
+
+Smoke test:
+
+```bash
+printf 'ubgi\nisready\nposition gnubgid 4HPwATDgc/ABMA\ndice 6 1\ngo role chequer\nquit\n' \
+  | opam exec -- _build/default/ubgi_engine.exe
+```
+
+Example `~/.config/bgci/config.toml` alias:
+
+```toml
+[engines.camlbot]
+command = [
+  "/opt/homebrew/bin/opam",
+  "exec",
+  "--",
+  "/absolute/path/to/camlbot/_build/default/ubgi_engine.exe",
+  "--ckpt",
+  "/absolute/path/to/camlbot/models/converted/large.10000.ot",
+  "--hidden",
+  "400,400,400,400,400",
+  "--activation",
+  "relu",
+  "--representation",
+  "expanded",
+  "--look-ahead",
+  "1",
+  "--device",
+  "cpu",
+]
+```
+
+Notes:
+- `--device` supports `cpu` and (on CUDA-capable hosts) `cuda:0`.
+- UBGI mode currently supports standard backgammon chequer play only.
 
 ## Experiments
 

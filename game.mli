@@ -12,7 +12,7 @@ val gnubg
   -> import_file:string
   -> export_file:string
   -> display:bool
-  -> timeout:Time.Span.t
+  -> timeout:Time_float.Span.t
   -> t Deferred.t
 
 val vs : t Per_player.t -> t

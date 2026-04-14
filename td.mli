@@ -3,7 +3,8 @@ open Core
 type t
 
 val create
-  :  ?epsilon_init:float
+  :  ?device:Torch.Device.t
+  -> ?epsilon_init:float
   -> hidden_layer_sizes:int list
   -> activation:[ `Sigmoid | `Relu ]
   -> representation:[ `Original | `Modified | `Expanded ]
@@ -34,5 +35,9 @@ val train
 val save : t -> filename:string -> unit
 
 val load : t -> filename:string -> unit
+
+val load_legacy_npz : t -> filename:string -> unit
+
+val var_shapes : t -> (string * int list) list
 
 val sexp_of_vars : t -> Sexp.t

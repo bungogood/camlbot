@@ -1,5 +1,48 @@
-(executables
- (names main)
- (libraries core async tensorflow)
+(library
+ (name backgammon_base)
+ (wrapped false)
+ (modules player per_player point board roll move outcome equity)
+ (libraries core)
+ (preprocess
+  (pps ppx_compare ppx_sexp_conv)))
+
+(library
+ (name backgammon_train)
+ (wrapped false)
+ (modules td replay_memory)
+ (libraries core async torch npy backgammon_base)
+ (preprocess
+  (pps ppx_let ppx_compare ppx_sexp_conv)))
+
+(executable
+ (name main)
+ (modules main game)
+ (libraries core async torch backgammon_base backgammon_train)
+ (preprocess
+  (pps ppx_let ppx_compare ppx_sexp_conv)))
+
+(executable
+ (name ubgi_engine)
+ (modules ubgi_engine)
+ (libraries core torch backgammon_base backgammon_train)
+ (preprocess
+  (pps ppx_compare ppx_sexp_conv)))
+
+(executable
+ (name torch_smoke)
+ (modules torch_smoke)
+ (libraries core torch))
+
+(executable
+ (name torch_train)
+ (modules torch_train)
+ (libraries core async torch backgammon_base backgammon_train)
+ (preprocess
+  (pps ppx_let ppx_compare ppx_sexp_conv)))
+
+(executable
+ (name convert_legacy_ckpt)
+ (modules convert_legacy_ckpt)
+ (libraries core async backgammon_train)
  (preprocess
   (pps ppx_let ppx_compare ppx_sexp_conv)))

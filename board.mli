@@ -40,3 +40,5 @@ val to_representation : t -> [ `Original | `Modified | `Expanded ] -> to_play:Pl
 val to_snowie : t -> to_play:Player.t -> Roll.t option -> string
 
 val of_snowie : string -> (t * [ `To_play of Player.t ] * Roll.t option) Or_error.t
+
+val of_gnubgid : string -> (t * [ `To_play of Player.t ]) Or_error.t

@@ -1,2 +1,7 @@
 _build/**
 saves/**
+
+.venv*/
+data/**/games-*/
+
+models/**

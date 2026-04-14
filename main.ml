@@ -27,7 +27,7 @@ module Game_config = struct
         ; import_file : string
         ; export_file : string
         ; display : bool
-        ; timeout : Time.Span.t
+        ; timeout : Time_float.Span.t
         }
     | Random
     | Pip_count_ratio of { look_ahead : int }
@@ -359,4 +359,4 @@ let () =
           ~abandon_after_move
         >>= main
     ]
-  |> Command.run
+  |> Command_unix.run

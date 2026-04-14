@@ -213,7 +213,7 @@ let gnubg ~command ~import_file ~export_file ~display ~timeout =
           | `In_time `Eof -> failwith "Failed to keep gnubg running."
           | `Timeout ->
             failwithf "Timeout reached after waiting for gnubg for %s."
-              (Time.Span.to_string_hum timeout) ())
+              (Time_float.Span.to_string_hum timeout) ())
         >>= fun () ->
         Reader.file_contents export_file
         >>| fun new_board_snowie ->

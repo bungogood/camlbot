@@ -375,3 +375,100 @@ let of_snowie s =
         Int.(15 - total_not_off))
     in
     { bar; off; points }, `To_play to_play, roll)
+
+let of_gnubgid id =
+  Or_error.try_with (fun () ->
+    let id = String.strip id in
+    if not (Int.equal (String.length id) 14) then
+      failwith "invalid gnubgid length"
+    else
+      let b64_value c =
+        match c with
+        | 'A' .. 'Z' -> Char.to_int c - Char.to_int 'A'
+        | 'a' .. 'z' -> Char.to_int c - Char.to_int 'a' + 26
+        | '0' .. '9' -> Char.to_int c - Char.to_int '0' + 52
+        | '+' -> 62
+        | '/' -> 63
+        | _ -> failwith "invalid base64 character in gnubgid"
+      in
+      let key = Bytes.make 10 '\000' in
+      let bits = ref 0 in
+      let bit_count = ref 0 in
+      let out_idx = ref 0 in
+      String.iter id ~f:(fun c ->
+        bits := (Int.shift_left !bits 6) lor (b64_value c);
+        bit_count := !bit_count + 6;
+        while Int.(!bit_count >= 8) && Int.(!out_idx < 10) do
+          bit_count := !bit_count - 8;
+          let byte = (Int.shift_right_logical !bits !bit_count) land 0xFF in
+          Bytes.set key !out_idx (Char.of_int_exn byte);
+          out_idx := !out_idx + 1
+        done);
+      if not (Int.equal !out_idx 10) then
+        failwith "invalid gnubgid payload"
+      else
+        let key_bit bit_index =
+          if Int.(bit_index >= 80) then
+            0
+          else
+            let byte = Char.to_int (Bytes.get key (bit_index / 8)) in
+            Int.bit_and (Int.shift_right_logical byte (bit_index mod 8)) 1
+        in
+        let pips = Array.create ~len:26 0 in
+        let bit_index = ref 0 in
+        let x_pieces = ref 0 in
+        let o_pieces = ref 0 in
+        for point = 24 downto 1 do
+          while Int.equal (key_bit !bit_index) 1 do
+            pips.(point) <- pips.(point) - 1;
+            o_pieces := !o_pieces + 1;
+            bit_index := !bit_index + 1
+          done;
+          bit_index := !bit_index + 1
+        done;
+        while Int.equal (key_bit !bit_index) 1 do
+          pips.(0) <- pips.(0) - 1;
+          o_pieces := !o_pieces + 1;
+          bit_index := !bit_index + 1
+        done;
+        bit_index := !bit_index + 1;
+        for point = 1 to 24 do
+          while Int.equal (key_bit !bit_index) 1 do
+            pips.(point) <- pips.(point) + 1;
+            x_pieces := !x_pieces + 1;
+            bit_index := !bit_index + 1
+          done;
+          bit_index := !bit_index + 1
+        done;
+        while Int.(!bit_index < 80) && Int.equal (key_bit !bit_index) 1 do
+          pips.(25) <- pips.(25) + 1;
+          x_pieces := !x_pieces + 1;
+          bit_index := !bit_index + 1
+        done;
+        let to_play = Player.Backwards in
+        let x_bar = Int.max 0 pips.(25) in
+        let o_bar = Int.max 0 (Int.neg pips.(0)) in
+        let bar =
+          Per_player.create (fun player ->
+            if Player.equal player to_play then x_bar else o_bar)
+        in
+        let points =
+          List.init 24 ~f:(fun index ->
+            let point = pips.(index + 1) in
+            if Int.(point >= 0) then
+              Point.create to_play point
+            else
+              Point.create (Player.flip to_play) (Int.neg point))
+        in
+        let off =
+          Per_player.create (fun player ->
+            let total_not_off =
+              Int.(
+                Per_player.get bar player
+                + List.fold points ~init:0 ~f:(fun total point -> total + Point.count point player))
+            in
+            if Int.(total_not_off > 15) then
+              failwith "invalid gnubgid checker count";
+            Int.(15 - total_not_off))
+        in
+        { bar; off; points }, `To_play to_play)
