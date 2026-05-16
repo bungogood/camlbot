@@ -207,6 +207,7 @@ let () =
     else if String.equal cmd "ubgi" then begin
       reply "id name camlbot 0.1";
       reply "id author jacobhilton";
+      reply "option name Ply type spin default 1 min 1 max 1";
       reply "ubgiok"
     end else if String.equal cmd "isready" then begin
       reply "readyok"
@@ -220,6 +221,9 @@ let () =
       if String.is_substring lower ~substring:"name variant" then begin
         if String.is_substring lower ~substring:"value backgammon" then ()
         else reply "error unsupported_feature variant"
+      end else if String.is_substring lower ~substring:"name ply" then begin
+        if String.is_substring lower ~substring:"value 1" then ()
+        else reply "error unsupported_feature ply"
       end
     end else if starts_with ~prefix:"position gnubgid " cmd then begin
       let id = String.drop_prefix cmd (String.length "position gnubgid ") |> String.strip in
