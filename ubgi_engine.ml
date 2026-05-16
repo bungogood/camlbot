@@ -205,7 +205,7 @@ let choose_best_turn ~player ~board ~roll =
 
 let set_ply ply =
   if ply < 1 || ply > 2 then
-    Error "error bad_argument ply"
+    Error "error bad_value engine.ply"
   else (
     (match current_eval with
      | Pipcount_eval r ->
@@ -231,13 +231,48 @@ let () =
     else if String.equal cmd "ubgi" then begin
       reply "id name camlbot 0.1";
       reply "id author jacobhilton";
+      reply "proto 0.2";
       let default_ply =
         match current_eval with
         | Pipcount_eval { look_ahead; _ } -> look_ahead
         | Td_eval { look_ahead; _ } -> look_ahead
       in
-      reply (sprintf "option name Ply type spin default %d min 1 max 2" default_ply);
+      reply "key game.variant enum backgammon backgammon";
+      reply (sprintf "key engine.ply int 1..2 %d" default_ply);
       reply "ubgiok"
+    end else if String.equal cmd "keys" then begin
+      reply "key game.variant enum backgammon backgammon";
+      reply "key engine.ply int 1..2 1"
+    end else if starts_with ~prefix:"get " cmd then begin
+      let key = String.drop_prefix cmd 4 |> String.strip in
+      if String.equal key "game.variant" then reply "value game.variant backgammon"
+      else if String.equal key "engine.ply" then (
+        let p =
+          match current_eval with
+          | Pipcount_eval { look_ahead; _ } -> look_ahead
+          | Td_eval { look_ahead; _ } -> look_ahead
+        in
+        reply (sprintf "value engine.ply %d" p)
+      )
+      else reply "error unsupported key"
+    end else if starts_with ~prefix:"set " cmd then begin
+      let parts = String.split (String.strip cmd) ~on:' ' |> List.filter ~f:(fun x -> not (String.is_empty x)) in
+      match parts with
+      | _::key::value_parts ->
+        let value = String.concat ~sep:" " value_parts in
+        if String.equal key "game.variant" then begin
+          if String.equal (String.lowercase (String.strip value)) "backgammon" then ()
+          else reply "error bad_value game.variant"
+        end else if String.equal key "engine.ply" then begin
+          match Int.of_string_opt (String.strip value) with
+          | None -> reply "error bad_value engine.ply"
+          | Some p ->
+            begin match set_ply p with
+            | Ok () -> ()
+            | Error _ -> reply "error bad_value engine.ply"
+            end
+        end else reply "error unsupported key"
+      | _ -> reply "error bad_command set"
     end else if String.equal cmd "isready" then begin
       reply "readyok"
     end else if String.equal cmd "newgame" then begin
@@ -245,25 +280,6 @@ let () =
       roll := None
     end else if String.equal cmd "quit" then begin
       exit 0
-    end else if starts_with ~prefix:"setoption name " cmd then begin
-      let lower = String.lowercase cmd in
-      if String.is_substring lower ~substring:"name variant" then begin
-        if String.is_substring lower ~substring:"value backgammon" then ()
-        else reply "error unsupported_feature variant"
-      end else if String.is_substring lower ~substring:"name ply" then begin
-        let value =
-          String.substr_replace_all lower ~pattern:"setoption name ply value" ~with_:""
-          |> String.strip
-        in
-        match Int.of_string_opt value with
-        | None -> reply "error bad_argument ply"
-        | Some ply ->
-          begin
-            match set_ply ply with
-            | Ok () -> ()
-            | Error err -> reply err
-          end
-      end
     end else if starts_with ~prefix:"position gnubgid " cmd then begin
       let id = String.drop_prefix cmd (String.length "position gnubgid ") |> String.strip in
       begin
@@ -272,26 +288,26 @@ let () =
           board := Some new_board;
           to_play := player;
           roll := None
-        | Error _ -> reply "error bad_argument invalid_position"
+        | Error _ -> reply "error bad_value position"
       end
     end else if String.equal cmd "position xgid" || starts_with ~prefix:"position xgid " cmd then begin
-      reply "error unsupported_feature position_xgid"
+      reply "error unsupported position.xgid"
     end else if starts_with ~prefix:"dice " cmd then begin
       let dice = String.drop_prefix cmd (String.length "dice ") in
       match parse_dice dice with
       | None ->
         roll := None;
-        reply "error bad_argument dice"
+        reply "error bad_value dice"
       | Some new_roll -> roll := Some new_roll
     end else if String.equal cmd "go" || starts_with ~prefix:"go " cmd then begin
       if String.is_substring cmd ~substring:"role cube"
          || String.is_substring cmd ~substring:"role turn"
       then
-        reply "error unsupported_feature role"
+        reply "error unsupported role"
       else
         match !board, !roll with
-        | None, _ -> reply "error missing_context position"
-        | _, None -> reply "error missing_context dice"
+        | None, _ -> reply "error bad_state missing.position"
+        | _, None -> reply "error bad_state missing.dice"
         | Some b, Some r ->
           begin
             match choose_best_turn ~player:!to_play ~board:b ~roll:r with
@@ -299,5 +315,5 @@ let () =
             | `Move mv -> reply ("bestmove " ^ mv)
           end
     end else begin
-      reply "error unknown_command"
+      reply "error bad_command unknown"
     end)
