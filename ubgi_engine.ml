@@ -46,11 +46,14 @@ type eval_mode =
       }
 
 type runtime_eval =
-  | Pipcount_eval of Equity.t
+  | Pipcount_eval of
+      { mutable look_ahead : int
+      ; mutable equity_fn : Equity.t
+      }
   | Td_eval of
       { td : Td.t
-      ; look_ahead : int
-      ; equity_fn : Equity.t
+      ; mutable look_ahead : int
+      ; mutable equity_fn : Equity.t
       }
 
 let parse_hidden_sizes s =
@@ -124,15 +127,19 @@ let parse_eval_mode () =
 
 let current_eval =
   match parse_eval_mode () with
-  | Pipcount -> Pipcount_eval (Equity.minimax Equity.pip_count_ratio ~look_ahead:1 Outcome.Game)
+  | Pipcount ->
+    Pipcount_eval
+      { look_ahead = 1
+      ; equity_fn = Equity.minimax Equity.pip_count_ratio ~look_ahead:1 Outcome.Game
+      }
   | Td { hidden_layer_sizes; activation; representation; ckpt; look_ahead; device } ->
     let td = Td.create ?device ~hidden_layer_sizes ~activation ~representation () in
     Td.load td ~filename:ckpt;
     Td_eval
       { td
-      ; look_ahead
-      ; equity_fn = Equity.minimax' (Td.eval td) ~look_ahead Outcome.Game
-      }
+       ; look_ahead
+       ; equity_fn = Equity.minimax' (Td.eval td) ~look_ahead Outcome.Game
+       }
 
 let score_one ~player ~board =
   let setup =
@@ -142,7 +149,7 @@ let score_one ~player ~board =
     }
   in
   match current_eval with
-  | Pipcount_eval equity_fn -> Equity.eval equity_fn setup
+  | Pipcount_eval { equity_fn; _ } -> Equity.eval equity_fn setup
   | Td_eval { look_ahead; td; equity_fn } ->
     if Int.equal look_ahead 1 then
       Td.eval td [| setup |] |> fun xs -> xs.(0)
@@ -151,7 +158,7 @@ let score_one ~player ~board =
 
 let score_many ~player boards =
   match current_eval with
-  | Pipcount_eval equity_fn ->
+  | Pipcount_eval { equity_fn; _ } ->
     List.map boards ~f:(fun board ->
       Equity.eval equity_fn
         { Equity.Setup.player
@@ -196,6 +203,23 @@ let choose_best_turn ~player ~board ~roll =
       |> String.concat ~sep:" "
       |> fun text -> `Move text
 
+let set_ply ply =
+  if ply < 1 || ply > 2 then
+    Error "error bad_argument ply"
+  else (
+    (match current_eval with
+     | Pipcount_eval r ->
+       if not (Int.equal r.look_ahead ply) then begin
+         r.look_ahead <- ply;
+         r.equity_fn <- Equity.minimax Equity.pip_count_ratio ~look_ahead:ply Outcome.Game
+       end
+     | Td_eval r ->
+       if not (Int.equal r.look_ahead ply) then begin
+         r.look_ahead <- ply;
+         r.equity_fn <- Equity.minimax' (Td.eval r.td) ~look_ahead:ply Outcome.Game
+       end);
+    Ok ())
+
 let () =
   let board = ref None in
   let to_play = ref Player.Backwards in
@@ -207,7 +231,12 @@ let () =
     else if String.equal cmd "ubgi" then begin
       reply "id name camlbot 0.1";
       reply "id author jacobhilton";
-      reply "option name Ply type spin default 1 min 1 max 1";
+      let default_ply =
+        match current_eval with
+        | Pipcount_eval { look_ahead; _ } -> look_ahead
+        | Td_eval { look_ahead; _ } -> look_ahead
+      in
+      reply (sprintf "option name Ply type spin default %d min 1 max 2" default_ply);
       reply "ubgiok"
     end else if String.equal cmd "isready" then begin
       reply "readyok"
@@ -222,8 +251,18 @@ let () =
         if String.is_substring lower ~substring:"value backgammon" then ()
         else reply "error unsupported_feature variant"
       end else if String.is_substring lower ~substring:"name ply" then begin
-        if String.is_substring lower ~substring:"value 1" then ()
-        else reply "error unsupported_feature ply"
+        let value =
+          String.substr_replace_all lower ~pattern:"setoption name ply value" ~with_:""
+          |> String.strip
+        in
+        match Int.of_string_opt value with
+        | None -> reply "error bad_argument ply"
+        | Some ply ->
+          begin
+            match set_ply ply with
+            | Ok () -> ()
+            | Error err -> reply err
+          end
       end
     end else if starts_with ~prefix:"position gnubgid " cmd then begin
       let id = String.drop_prefix cmd (String.length "position gnubgid ") |> String.strip in
